@@ -1,8 +1,8 @@
 name: Pluto TV Colombia Official Sync
 on:
   schedule:
-    - cron: '0 */6 * * *' # Se ejecuta cada 6 horas
-  workflow_dispatch: # Permite ejecución manual desde la pestaña Actions
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   grab-epg:
@@ -10,8 +10,10 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout tu repositorio
-        uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Instalar Node.js
         uses: actions/setup-node@v3
@@ -20,40 +22,24 @@ jobs:
 
       - name: Clonar e Instalar EPG Tool
         run: |
-          # Clonamos la herramienta oficial de iptv-org
           git clone --depth 1 -b master https://github.com/iptv-org/epg.git epg-tool
-          cd epg-tool
-          npm install
+          cd epg-tool && npm install
 
-      - name: Generar EPG Oficial
+      - name: Generar EPG (Latam)
         run: |
           cd epg-tool
-          # Generamos la guía para Pluto TV México (compatible con tu lista)
-          # El archivo se guarda un nivel arriba, en la raíz de tu repo
-          npm run grab -- --site=plutotv.com --maxConnections=10 --output=../epg.xml
+          # Usamos específicamente el archivo de canales de México (Latam)
+          npm run grab -- --channels=sites/plutotv.com/plutotv.com_mx.channels.xml --maxConnections=10 --output=../epg.xml
 
       - name: Descargar Lista M3U
         run: |
-          # Descargamos la lista estable de iptv-org
-          curl -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
+          curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
 
-      - name: Verificar y Limpiar
+      - name: Forzar Guardado
         run: |
-          # Verificamos que los archivos existan y tengan tamaño
-          ls -lh playlist.m3u epg.xml
-          # Borramos la herramienta para que no ensucie el commit
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
           rm -rf epg-tool
-
-      - name: Forzar Guardado en GitHub
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # Forzamos el agregado de los archivos (el -f evita bloqueos de .gitignore)
-          git add -f playlist.m3u epg.xml
-          
-          # Hacemos el commit. El "|| exit 0" evita que el script falle si no hay cambios.
-          git commit -m "Actualización Pluto TV: $(date)" || exit 0
-          
-          # Empujamos los cambios a la rama principal
+          git add playlist.m3u epg.xml
+          git commit -m "Update Pluto Latam: $(date +'%Y-%m-%d %H:%M')" || exit 0
           git push origin main
