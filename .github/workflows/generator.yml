@@ -8,12 +8,10 @@ jobs:
   grab-epg:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # CRUCIAL: Verifica que esto esté así
+      contents: write
     steps:
-      - name: Checkout
+      - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Instalar Node.js
         uses: actions/setup-node@v3
@@ -25,30 +23,29 @@ jobs:
           git clone --depth 1 -b master https://github.com/iptv-org/epg.git epg-tool
           cd epg-tool && npm install
 
-      - name: Generar EPG (Latam)
+      - name: Generar EPG usando lista de canales MX
         run: |
           cd epg-tool
-          # Si este archivo falla, prueba solo con --site=plutotv.com
-          npm run grab -- --channels=sites/plutotv.com/plutotv.com_mx.channels.xml --maxConnections=10 --output=../epg.xml
+          # Usamos la opción --channels con la ruta del archivo que encontraste
+          # Esto garantiza que solo descargue la programación de Pluto MX
+          npm run grab -- --channels=sites/pluto.tv/pluto.tv_mx.channels.xml --maxConnections=10 --output=../epg.xml
 
       - name: Descargar Lista M3U
         run: |
+          # Lista de canales de iptv-org para MX
           curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
 
-      - name: Publicar Archivos (Método de Sobrescritura)
+      - name: Guardar cambios en el Repositorio
         run: |
-          # 1. Configurar identidad
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
           
-          # 2. Limpiar basura
+          # Eliminamos la herramienta para que no se suba al repo
           rm -rf epg-tool
           
-          # 3. Forzar el reemplazo de los archivos en el índice
+          # Agregamos los archivos generados
           git add playlist.m3u epg.xml
           
-          # 4. Commit con timestamp para que siempre sea "nuevo"
-          git commit -m "Sync Pluto: $(date -u)"
-          
-          # 5. Push forzado a la rama main
-          git push origin main --force
+          # Hacemos el commit y el push
+          git commit -m "Update Pluto MX EPG: $(date)" || exit 0
+          git push origin main
