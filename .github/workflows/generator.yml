@@ -1,8 +1,8 @@
 name: IPTV-Org Official EPG Generator
 on:
   schedule:
-    - cron: '0 */6 * * *' # Se ejecuta cada 6 horas
-  workflow_dispatch: # Permite ejecución manual
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   grab-epg:
@@ -18,31 +18,35 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Clonar repositorio de EPG oficial
+      - name: Clonar e Instalar EPG Tool
         run: |
           git clone --depth 1 -b master https://github.com/iptv-org/epg.git epg-tool
-
-      - name: Instalar dependencias del grabber
-        run: |
           cd epg-tool
           npm install
 
-      - name: Generar EPG de Pluto TV
+      - name: Generar EPG
         run: |
           cd epg-tool
-          # Ejecutamos el comando oficial para plutotv.com
-          # Usamos --maxConnections=10 para que sea más rápido
+          # Generamos el archivo directamente en la raíz del repositorio principal
           npm run grab -- --site=plutotv.com --maxConnections=10 --output=../epg.xml
-
+          
       - name: Descargar Lista M3U
         run: |
-          # Descargamos la lista que ya verificamos que te funciona
           curl -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
 
-      - name: Guardar archivos en tu repo
+      - name: Verificar archivos antes del commit
+        run: |
+          echo "Contenido de la raíz del repo:"
+          ls -lh playlist.m3u epg.xml
+          echo "Previsualización del M3U:"
+          head -n 5 playlist.m3u
+
+      - name: Forzar Guardado en GitHub
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add playlist.m3u epg.xml
-          git commit -m "EPG oficial generado via iptv-org/epg $(date)" || exit 0
-          git push
+          # El '|| true' evita que el workflow falle si no hay cambios, 
+          # pero 'git commit -a' asegura que tome los archivos modificados.
+          git commit -m "EPG y Playlist actualizados: $(date)" || echo "No hay cambios para subir"
+          git push origin main
