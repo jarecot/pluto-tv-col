@@ -1,32 +1,29 @@
 name: Pluto TV Colombia Autoupdate
 on:
   schedule:
-    - cron: '0 */12 * * *' # Se actualiza cada 12 horas
-  workflow_dispatch: # Permite que tú le des a un botón para actualizar cuando quieras
+    - cron: '0 */12 * * *'
+  workflow_dispatch:
 
 jobs:
   generate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Esto le da permiso explícito para guardar la lista
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Instalar generador
+      - name: Generar Lista Directa
         run: |
-          # Usamos una versión ligera del generador que no requiere Docker
-          curl -s https://raw.githubusercontent.com/HelmerLuzo/Pluto/main/plutotv.py -o generator.py
-          
-      - name: Generar Lista Colombia
-        run: |
-          # Ejecutamos el script forzando la región de Colombia
-          python3 generator.py --region co --output playlist.m3u
-          # Si el script anterior no genera EPG, bajamos uno compatible
-          curl -s https://raw.githubusercontent.com/HelmerLuzo/Pluto/main/epg.xml -o epg.xml
+          # Usamos un comando directo para obtener una lista de calidad ya filtrada
+          # Esto evita que el script falle por cambios en la API de Pluto
+          curl -s "https://raw.githubusercontent.com/HelmerLuzo/Pluto/main/plutotv_co.m3u" -o playlist.m3u
+          curl -s "https://raw.githubusercontent.com/HelmerLuzo/Pluto/main/epg.xml" -o epg.xml
 
-      - name: Guardar cambios en GitHub
+      - name: Guardar cambios
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
           git add playlist.m3u epg.xml
-          git commit -m "Lista actualizada $(date)" || echo "Sin cambios"
+          git commit -m "Lista actualizada $(date)" || exit 0
           git push
