@@ -1,29 +1,31 @@
 name: Pluto TV Colombia Autoupdate
 on:
   schedule:
-    - cron: '0 */12 * * *'
+    - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
   generate:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Esto le da permiso explícito para guardar la lista
+      contents: write
     steps:
       - name: Checkout repo
         uses: actions/checkout@v3
 
-      - name: Generar Lista Directa
+      - name: Descargar Lista y EPG
         run: |
-          # Usamos un comando directo para obtener una lista de calidad ya filtrada
-          # Esto evita que el script falle por cambios en la API de Pluto
-          curl -s "https://raw.githubusercontent.com/HelmerLuzo/Pluto/main/plutotv_co.m3u" -o playlist.m3u
-          curl -s "https://raw.githubusercontent.com/HelmerLuzo/Pluto/main/epg.xml" -o epg.xml
+          # 1. Usamos la lista de iptv-org que ya sabemos que te funciona
+          curl -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
+          
+          # 2. USAMOS ESTE EPG (Es el más estable para Pluto Latino)
+          # Fuente: Matt Huisman (mjh.nz), el estándar de la industria
+          curl -L -s "https://i.mjh.nz/PlutoTV/mx.xml" -o epg.xml
 
       - name: Guardar cambios
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add playlist.m3u epg.xml
-          git commit -m "Lista actualizada $(date)" || exit 0
+          git commit -m "Sincronizado $(date)" || exit 0
           git push
