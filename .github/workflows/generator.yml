@@ -8,12 +8,12 @@ jobs:
   grab-epg:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write # CRUCIAL: Verifica que esto esté así
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Instalar Node.js
         uses: actions/setup-node@v3
@@ -28,18 +28,27 @@ jobs:
       - name: Generar EPG (Latam)
         run: |
           cd epg-tool
-          # Usamos específicamente el archivo de canales de México (Latam)
+          # Si este archivo falla, prueba solo con --site=plutotv.com
           npm run grab -- --channels=sites/plutotv.com/plutotv.com_mx.channels.xml --maxConnections=10 --output=../epg.xml
 
       - name: Descargar Lista M3U
         run: |
           curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
 
-      - name: Forzar Guardado
+      - name: Publicar Archivos (Método de Sobrescritura)
         run: |
+          # 1. Configurar identidad
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
+          
+          # 2. Limpiar basura
           rm -rf epg-tool
+          
+          # 3. Forzar el reemplazo de los archivos en el índice
           git add playlist.m3u epg.xml
-          git commit -m "Update Pluto Latam: $(date +'%Y-%m-%d %H:%M')" || exit 0
-          git push origin main
+          
+          # 4. Commit con timestamp para que siempre sea "nuevo"
+          git commit -m "Sync Pluto: $(date -u)"
+          
+          # 5. Push forzado a la rama main
+          git push origin main --force
