@@ -1,31 +1,48 @@
-name: Pluto TV Colombia Autoupdate
+name: IPTV-Org Official EPG Generator
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *' # Se ejecuta cada 6 horas
+  workflow_dispatch: # Permite ejecución manual
 
 jobs:
-  generate:
+  grab-epg:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout repo
+      - name: Checkout tu repositorio
         uses: actions/checkout@v3
 
-      - name: Descargar Lista y EPG
-        run: |
-          # 1. Usamos la lista de iptv-org que ya sabemos que te funciona
-          curl -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
-          
-          # 2. USAMOS ESTE EPG (Es el más estable para Pluto Latino)
-          # Fuente: Matt Huisman (mjh.nz), el estándar de la industria
-          curl -L -s "https://i.mjh.nz/PlutoTV/mx.xml" -o epg.xml
+      - name: Instalar Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
 
-      - name: Guardar cambios
+      - name: Clonar repositorio de EPG oficial
+        run: |
+          git clone --depth 1 -b master https://github.com/iptv-org/epg.git epg-tool
+
+      - name: Instalar dependencias del grabber
+        run: |
+          cd epg-tool
+          npm install
+
+      - name: Generar EPG de Pluto TV
+        run: |
+          cd epg-tool
+          # Ejecutamos el comando oficial para plutotv.com
+          # Usamos --maxConnections=10 para que sea más rápido
+          npm run grab -- --site=plutotv.com --maxConnections=10 --output=../epg.xml
+
+      - name: Descargar Lista M3U
+        run: |
+          # Descargamos la lista que ya verificamos que te funciona
+          curl -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
+
+      - name: Guardar archivos en tu repo
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add playlist.m3u epg.xml
-          git commit -m "Sincronizado $(date)" || exit 0
+          git commit -m "EPG oficial generado via iptv-org/epg $(date)" || exit 0
           git push
