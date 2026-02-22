@@ -1,0 +1,32 @@
+name: Pluto TV Colombia Autoupdate
+on:
+  schedule:
+    - cron: '0 */12 * * *' # Se actualiza cada 12 horas
+  workflow_dispatch: # Permite que tú le des a un botón para actualizar cuando quieras
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Instalar generador
+        run: |
+          # Usamos una versión ligera del generador que no requiere Docker
+          curl -s https://raw.githubusercontent.com/HelmerLuzo/Pluto/main/plutotv.py -o generator.py
+          
+      - name: Generar Lista Colombia
+        run: |
+          # Ejecutamos el script forzando la región de Colombia
+          python3 generator.py --region co --output playlist.m3u
+          # Si el script anterior no genera EPG, bajamos uno compatible
+          curl -s https://raw.githubusercontent.com/HelmerLuzo/Pluto/main/epg.xml -o epg.xml
+
+      - name: Guardar cambios en GitHub
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add playlist.m3u epg.xml
+          git commit -m "Lista actualizada $(date)" || echo "Sin cambios"
+          git push
