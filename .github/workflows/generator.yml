@@ -1,4 +1,4 @@
-name: Pluto TV Latam - Smart Sync
+name: Pluto TV Smart Sync - Force Update
 on:
   schedule:
     - cron: '0 */6 * * *'
@@ -24,42 +24,47 @@ jobs:
           import xml.etree.ElementTree as ET
           import re
 
-          # 1. Leer nombres y IDs de la lista M3U
-          m3u_channels = {}
-          with open('playlist.m3u', 'r', encoding='utf-8') as f:
-              content = f.read()
-              # Buscamos el ID (tvg-id) y el nombre final de la línea que empieza por #EXTINF
-              matches = re.findall(r'tvg-id="([^"]+)".*?,([^\n\r]+)', content)
-              for tid, name in matches:
-                  m3u_channels[name.strip().lower()] = tid
+          try:
+              m3u_channels = {}
+              # Expresión regular mejorada para capturar tvg-id y el nombre final
+              with open('playlist.m3u', 'r', encoding='utf-8') as f:
+                  for line in f:
+                      if line.startswith('#EXTINF'):
+                          tid_match = re.search(r'tvg-id="([^"]+)"', line)
+                          name_match = line.split(',')[-1].strip().lower()
+                          if tid_match and name_match:
+                              m3u_channels[name_match] = tid_match.group(1)
 
-          # 2. Procesar el XML para que coincida con la lista
-          tree = ET.parse('epg_raw.xml')
-          root = tree.getroot()
+              tree = ET.parse('epg_raw.xml')
+              root = tree.getroot()
 
-          for channel in root.findall('channel'):
-              name_element = channel.find('display-name')
-              if name_element is not None:
-                  chan_name = name_element.text.strip().lower()
-                  # Si el nombre del canal está en nuestra lista M3U, le ponemos el ID del M3U
-                  if chan_name in m3u_channels:
-                      original_id = channel.get('id')
-                      new_id = m3u_channels[chan_name]
-                      
-                      # Actualizamos el ID del canal
-                      channel.set('id', new_id)
-                      
-                      # Actualizamos todas las programaciones que usaban el ID viejo
-                      for prog in root.findall(f".//programme[@channel='{original_id}']"):
-                          prog.set('channel', new_id)
-
-          tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
+              count = 0
+              for channel in root.findall('channel'):
+                  for dn in channel.findall('display-name'):
+                      name = dn.text.strip().lower()
+                      if name in m3u_channels:
+                          old_id = channel.get('id')
+                          new_id = m3u_channels[name]
+                          channel.set('id', new_id)
+                          # Actualizar programas
+                          for prog in root.findall(f".//programme[@channel='{old_id}']"):
+                              prog.set('channel', new_id)
+                          count += 1
+              
+              print(f"Sincronizados {count} canales exitosamente.")
+              tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
+          except Exception as e:
+              print(f"Error procesando el EPG: {e}")
+              exit(1)
           EOF
 
       - name: Publicar en GitHub
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Bot"
+          # Forzamos la actualización eliminando el viejo antes de agregar
+          rm -f epg_raw.xml
           git add playlist.m3u epg.xml
-          git commit -m "Smart Sync Pluto: $(date)" || exit 0
-          git push origin main
+          # El '|| true' evita que el workflow falle si no hay cambios
+          git commit -m "Update Pluto EPG: $(date)" || true
+          git push origin main --force
