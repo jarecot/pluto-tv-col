@@ -1,4 +1,4 @@
-name: Pluto TV - Sync Total
+name: Pluto TV - Sync Total con IDs de URL
 on:
   schedule:
     - cron: '0 */6 * * *'
@@ -13,57 +13,61 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Descargar Fuentes Frescas
+      - name: Descargar Fuentes
         run: |
-          curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
+          curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist_raw.m3u
           curl -L -s "https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/PlutoTV/mx.xml" -o epg_raw.xml
 
-      - name: Procesar con Python (Extracción Mejorada)
+      - name: Reparar M3U y Sincronizar EPG (Python)
         run: |
           python3 - <<EOF
-          import xml.etree.ElementTree as ET
           import re
           import os
+          import xml.etree.ElementTree as ET
 
-          m3u_ids = set()
-          try:
-              # 1. Extracción ultra-robusta de IDs
-              if os.path.exists('playlist.m3u'):
-                  with open('playlist.m3u', 'r', encoding='utf-8') as f:
-                      content = f.read()
-                      # Buscamos tvg-id="valor" o tvg-id='valor' o incluso channel-id=
-                      found = re.findall(r'tvg-id=["\']([^"\']+)["\']', content)
-                      for fid in found:
-                          m3u_ids.add(fid)
-                          
-              print(f"IDs encontrados en M3U: {len(m3u_ids)}")
+          # 1. REPARAR LA LISTA M3U (Inyectar IDs desde la URL)
+          repaired_m3u = []
+          found_ids = set()
+          
+          with open('playlist_raw.m3u', 'r', encoding='utf-8') as f:
+              lines = f.readlines()
+              for i in range(len(lines)):
+                  line = lines[i]
+                  if line.startswith('#EXTINF'):
+                      # Intentamos capturar la siguiente línea que es la URL
+                      if i + 1 < len(lines):
+                          url = lines[i+1]
+                          # Extraer el ID de la URL (ej: /channel/61a52615cbef2500072876e2/)
+                          match = re.search(r'/channel/([a-f0-9]{24})', url)
+                          if match:
+                              channel_id = match.group(1)
+                              found_ids.add(channel_id)
+                              # Reemplazar tvg-id="" por tvg-id="id_real"
+                              line = line.replace('tvg-id=""', f'tvg-id="{channel_id}"')
+                      repaired_m3u.append(line)
+                  else:
+                      repaired_m3u.append(line)
 
-              # 2. Cargar el EPG
-              tree = ET.parse('epg_raw.xml')
-              root = tree.getroot()
+          with open('playlist.m3u', 'w', encoding='utf-8') as f:
+              f.writelines(repaired_m3u)
+          
+          print(f"Lista M3U reparada. Se inyectaron {len(found_ids)} IDs.")
 
-              # 3. Validar cuántos canales del XML coinciden
-              matches = 0
-              for channel in root.findall('channel'):
-                  if channel.get('id') in m3u_ids:
-                      matches += 1
-              
-              print(f"Coincidencias reales con el EPG: {matches}")
-
-              # 4. Guardar archivo final
-              tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
-              print("Archivo epg.xml generado correctamente.")
-
-          except Exception as e:
-              print(f"Error: {e}")
-              exit(1)
+          # 2. PROCESAR EL XML
+          tree = ET.parse('epg_raw.xml')
+          root = tree.getroot()
+          
+          # No necesitamos filtrar el XML, el de Matt ya viene con los IDs correctos.
+          # Solo lo guardamos para que TiviMate lo lea.
+          tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
+          print("EPG procesado exitosamente.")
           EOF
 
       - name: Publicar Cambios
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Bot"
-          rm -f epg_raw.xml
+          rm -f playlist_raw.m3u epg_raw.xml
           git add playlist.m3u epg.xml
-          git commit -m "Sync Total: $(date +'%Y-%m-%d %H:%M:%S')" || exit 0
+          git commit -m "Reparación de IDs y Sync EPG: $(date +'%Y-%m-%d %H:%M:%S')" || exit 0
           git push origin main --force
