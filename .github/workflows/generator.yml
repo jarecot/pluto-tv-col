@@ -1,8 +1,8 @@
-name: Pluto TV Smart Sync - Force Update
+name: Pluto TV - Auto Sync Matt Huisman
 on:
   schedule:
-    - cron: '0 */6 * * *'
-  workflow_dispatch:
+    - cron: '0 */6 * * *' # Se ejecuta cada 6 horas
+  workflow_dispatch: # Permite ejecutarlo manualmente
 
 jobs:
   generate:
@@ -13,58 +13,56 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Descargar Archivos
+      - name: Descargar M3U e XMLTV
         run: |
+          # Descargar la lista estable de iptv-org
           curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
-          curl -L -s "https://i.mjh.nz/PlutoTV/mx.xml" -o epg_raw.xml
+          
+          # Descargar el EPG actualizado de Matt Huisman
+          curl -L -s "https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/PlutoTV/mx.xml" -o epg_raw.xml
 
-      - name: Mapeo de IDs por Nombre (Python)
+      - name: Sincronización Inteligente (Python)
         run: |
           python3 - <<EOF
           import xml.etree.ElementTree as ET
           import re
 
           try:
-              m3u_channels = {}
-              # Expresión regular mejorada para capturar tvg-id y el nombre final
+              # 1. Mapear los IDs presentes en la lista M3U
+              m3u_ids = set()
               with open('playlist.m3u', 'r', encoding='utf-8') as f:
                   for line in f:
-                      if line.startswith('#EXTINF'):
-                          tid_match = re.search(r'tvg-id="([^"]+)"', line)
-                          name_match = line.split(',')[-1].strip().lower()
-                          if tid_match and name_match:
-                              m3u_channels[name_match] = tid_match.group(1)
+                      if 'tvg-id="' in line:
+                          match = re.search(r'tvg-id="([^"]+)"', line)
+                          if match:
+                              m3u_ids.add(match.group(1))
 
+              # 2. Cargar el XML de Matt Huisman
               tree = ET.parse('epg_raw.xml')
               root = tree.getroot()
 
+              # 3. Validar coincidencias
               count = 0
               for channel in root.findall('channel'):
-                  for dn in channel.findall('display-name'):
-                      name = dn.text.strip().lower()
-                      if name in m3u_channels:
-                          old_id = channel.get('id')
-                          new_id = m3u_channels[name]
-                          channel.set('id', new_id)
-                          # Actualizar programas
-                          for prog in root.findall(f".//programme[@channel='{old_id}']"):
-                              prog.set('channel', new_id)
-                          count += 1
+                  if channel.get('id') in m3u_ids:
+                      count += 1
               
-              print(f"Sincronizados {count} canales exitosamente.")
+              print(f"Sincronización exitosa: {count} canales con guía encontrados.")
+              
+              # 4. Guardar como epg.xml (el que leerá TiviMate)
               tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
+              
           except Exception as e:
-              print(f"Error procesando el EPG: {e}")
+              print(f"Error procesando EPG: {e}")
               exit(1)
           EOF
 
-      - name: Publicar en GitHub
+      - name: Publicar cambios en GitHub
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Bot"
-          # Forzamos la actualización eliminando el viejo antes de agregar
+          # Eliminamos el archivo temporal para no ensuciar el repo
           rm -f epg_raw.xml
           git add playlist.m3u epg.xml
-          # El '|| true' evita que el workflow falle si no hay cambios
-          git commit -m "Update Pluto EPG: $(date)" || true
+          git commit -m "Auto-update Pluto EPG: $(date)" || true
           git push origin main --force
