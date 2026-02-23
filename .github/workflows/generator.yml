@@ -1,51 +1,53 @@
-name: Pluto TV Colombia Official Sync
+name: Pluto TV Latam Ultimate Sync
 on:
   schedule:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
 jobs:
-  grab-epg:
+  generate:
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - name: Checkout repo
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Instalar Node.js
-        uses: actions/setup-node@v3
-        with:
-          node-version: '18'
-
-      - name: Clonar e Instalar EPG Tool
+      - name: Descargar M3U y EPG
         run: |
-          git clone --depth 1 -b master https://github.com/iptv-org/epg.git epg-tool
-          cd epg-tool && npm install
-
-      - name: Generar EPG usando lista de canales MX
-        run: |
-          cd epg-tool
-          # Usamos la opción --channels con la ruta del archivo que encontraste
-          # Esto garantiza que solo descargue la programación de Pluto MX
-          npm run grab -- --channels=sites/pluto.tv/pluto.tv_mx.channels.xml --maxConnections=10 --output=../epg.xml
-
-      - name: Descargar Lista M3U
-        run: |
-          # Lista de canales de iptv-org para MX
+          # 1. Descargamos la lista estable de iptv-org
           curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
+          
+          # 2. Descargamos el EPG de MJH (México)
+          curl -L -s "https://i.mjh.nz/PlutoTV/mx.xml" -o epg_raw.xml
 
-      - name: Guardar cambios en el Repositorio
+      - name: Sincronizar IDs (Python)
+        run: |
+          python3 - <<EOF
+          import xml.etree.ElementTree as ET
+          import re
+
+          # 1. Parsear el EPG
+          tree = ET.parse('epg_raw.xml')
+          root = tree.getroot()
+
+          # 2. Diccionario de mapeo basado en lo que usa la lista de iptv-org
+          # El formato de iptv-org suele ser: hash.mx o slug.mx
+          # Vamos a limpiar los IDs del EPG para que TiviMate los empareje fácil
+          for channel in root.findall('channel'):
+              disp_name = channel.find('display-name').text
+              # El ID en MJH suele ser el nombre del canal. 
+              # Lo dejamos limpio para que coincida con el logo y el nombre del M3U
+              new_id = channel.get('id') 
+              # No tocamos mucho aquí, MJH ya usa el 'id' que tu script local llama 'format=id'
+          
+          tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
+          EOF
+
+      - name: Publicar en GitHub
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          
-          # Eliminamos la herramienta para que no se suba al repo
-          rm -rf epg-tool
-          
-          # Agregamos los archivos generados
           git add playlist.m3u epg.xml
-          
-          # Hacemos el commit y el push
-          git commit -m "Update Pluto MX EPG: $(date)" || exit 0
+          git commit -m "Update Pluto: $(date)" || exit 0
           git push origin main
