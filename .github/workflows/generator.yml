@@ -1,4 +1,4 @@
-name: Pluto TV - Sync Total con IDs de URL
+name: Pluto TV Ultimate Sync - Anti-Cache
 on:
   schedule:
     - cron: '0 */6 * * *'
@@ -10,64 +10,75 @@ jobs:
     permissions:
       contents: write
     steps:
-      - name: Checkout
+      - name: Checkout del Repositorio
         uses: actions/checkout@v4
 
       - name: Descargar Fuentes
         run: |
-          curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist_raw.m3u
-          curl -L -s "https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/PlutoTV/mx.xml" -o epg_raw.xml
+          # Descargamos con parámetros para evitar archivos cacheados por el servidor de origen
+          curl -L -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist_raw.m3u
+          curl -L -s -H "Cache-Control: no-cache" "https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/PlutoTV/mx.xml" -o epg_raw.xml
 
-      - name: Reparar M3U y Sincronizar EPG (Python)
+      - name: Reparar M3U y Forzar EPG (Python)
         run: |
           python3 - <<EOF
           import re
           import os
           import xml.etree.ElementTree as ET
+          from datetime import datetime
 
           # 1. REPARAR LA LISTA M3U (Inyectar IDs desde la URL)
           repaired_m3u = []
           found_ids = set()
           
-          with open('playlist_raw.m3u', 'r', encoding='utf-8') as f:
-              lines = f.readlines()
-              for i in range(len(lines)):
-                  line = lines[i]
-                  if line.startswith('#EXTINF'):
-                      # Intentamos capturar la siguiente línea que es la URL
-                      if i + 1 < len(lines):
-                          url = lines[i+1]
-                          # Extraer el ID de la URL (ej: /channel/61a52615cbef2500072876e2/)
-                          match = re.search(r'/channel/([a-f0-9]{24})', url)
-                          if match:
-                              channel_id = match.group(1)
-                              found_ids.add(channel_id)
-                              # Reemplazar tvg-id="" por tvg-id="id_real"
-                              line = line.replace('tvg-id=""', f'tvg-id="{channel_id}"')
-                      repaired_m3u.append(line)
-                  else:
+          if os.path.exists('playlist_raw.m3u'):
+              with open('playlist_raw.m3u', 'r', encoding='utf-8') as f:
+                  lines = f.readlines()
+                  for i in range(len(lines)):
+                      line = lines[i]
+                      if line.startswith('#EXTINF'):
+                          if i + 1 < len(lines):
+                              url = lines[i+1]
+                              # Extraemos el ID hexadecimal de 24 caracteres de la URL
+                              match = re.search(r'/channel/([a-f0-9]{24})', url)
+                              if match:
+                                  channel_id = match.group(1)
+                                  found_ids.add(channel_id)
+                                  # Reemplazamos el tvg-id vacío por el real
+                                  line = line.replace('tvg-id=""', f'tvg-id="{channel_id}"')
                       repaired_m3u.append(line)
 
           with open('playlist.m3u', 'w', encoding='utf-8') as f:
               f.writelines(repaired_m3u)
           
-          print(f"Lista M3U reparada. Se inyectaron {len(found_ids)} IDs.")
+          print(f"M3U: Se inyectaron {len(found_ids)} IDs.")
 
-          # 2. PROCESAR EL XML
+          # 2. PROCESAR EPG Y EVITAR CACHÉ
           tree = ET.parse('epg_raw.xml')
           root = tree.getroot()
           
-          # No necesitamos filtrar el XML, el de Matt ya viene con los IDs correctos.
-          # Solo lo guardamos para que TiviMate lo lea.
+          # Añadimos un comentario único al final del XML para que el archivo SIEMPRE sea distinto
+          timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+          comment = ET.Comment(f" Actualización forzada: {timestamp} ")
+          root.append(comment)
+
           tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
-          print("EPG procesado exitosamente.")
+          print(f"EPG: Generado exitosamente el {timestamp}")
           EOF
 
-      - name: Publicar Cambios
+      - name: Publicar en GitHub
         run: |
-          git config --local user.email "actions@github.com"
-          git config --local user.name "GitHub Bot"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # Eliminamos temporales
           rm -f playlist_raw.m3u epg_raw.xml
+          
+          # Forzamos que Git vea los cambios
           git add playlist.m3u epg.xml
-          git commit -m "Reparación de IDs y Sync EPG: $(date +'%Y-%m-%d %H:%M:%S')" || exit 0
+          
+          # El commit con fecha asegura que el historial se mueva
+          git commit -m "Update Pluto TV: $(date +'%Y-%m-%d %H:%M:%S')" || exit 0
+          
+          # Push forzado para actualizar los Raw de GitHub
           git push origin main --force
