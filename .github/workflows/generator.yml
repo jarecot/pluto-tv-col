@@ -1,8 +1,8 @@
-name: Pluto TV - Auto Sync Matt Huisman
+name: Pluto TV - Force Sync Matt Huisman
 on:
   schedule:
-    - cron: '0 */6 * * *' # Se ejecuta cada 6 horas
-  workflow_dispatch: # Permite ejecutarlo manualmente
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   generate:
@@ -15,54 +15,63 @@ jobs:
 
       - name: Descargar M3U e XMLTV
         run: |
-          # Descargar la lista estable de iptv-org
+          # Descargamos los archivos frescos
           curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
-          
-          # Descargar el EPG actualizado de Matt Huisman
           curl -L -s "https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/PlutoTV/mx.xml" -o epg_raw.xml
 
-      - name: Sincronización Inteligente (Python)
+      - name: Sincronización de IDs (Python)
         run: |
           python3 - <<EOF
           import xml.etree.ElementTree as ET
           import re
+          import os
 
           try:
-              # 1. Mapear los IDs presentes en la lista M3U
+              # 1. Mapear IDs de la lista
               m3u_ids = set()
-              with open('playlist.m3u', 'r', encoding='utf-8') as f:
-                  for line in f:
-                      if 'tvg-id="' in line:
+              if os.path.exists('playlist.m3u'):
+                  with open('playlist.m3u', 'r', encoding='utf-8') as f:
+                      for line in f:
                           match = re.search(r'tvg-id="([^"]+)"', line)
                           if match:
                               m3u_ids.add(match.group(1))
+              
+              print(f"IDs encontrados en M3U: {len(m3u_ids)}")
 
-              # 2. Cargar el XML de Matt Huisman
+              # 2. Procesar el XML
               tree = ET.parse('epg_raw.xml')
               root = tree.getroot()
 
-              # 3. Validar coincidencias
-              count = 0
+              matches = 0
               for channel in root.findall('channel'):
                   if channel.get('id') in m3u_ids:
-                      count += 1
+                      matches += 1
               
-              print(f"Sincronización exitosa: {count} canales con guía encontrados.")
-              
-              # 4. Guardar como epg.xml (el que leerá TiviMate)
+              print(f"Matches encontrados en XML: {matches}")
+
+              # 3. Guardar el archivo FINAL
+              # Forzamos la codificación UTF-8
               tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
-              
+              print("Archivo epg.xml generado correctamente.")
+
           except Exception as e:
-              print(f"Error procesando EPG: {e}")
+              print(f"Error CRÍTICO: {e}")
               exit(1)
           EOF
 
-      - name: Publicar cambios en GitHub
+      - name: Publicar cambios
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Bot"
-          # Eliminamos el archivo temporal para no ensuciar el repo
+          
+          # Borramos el temporal para que no se suba
           rm -f epg_raw.xml
+          
+          # Añadimos los archivos
           git add playlist.m3u epg.xml
-          git commit -m "Auto-update Pluto EPG: $(date)" || true
+          
+          # El commit incluirá la fecha y hora para forzar el cambio en el historial
+          git commit -m "Actualización forzada EPG: $(date +'%Y-%m-%d %H:%M:%S')" || echo "No hay cambios para subir"
+          
+          # Push con force para asegurar que GitHub actualice el endpoint
           git push origin main --force
