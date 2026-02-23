@@ -15,50 +15,55 @@ jobs:
 
       - name: Descargar Fuentes Frescas
         run: |
-          # Descargamos con -o para sobrescribir cualquier archivo local
           curl -L -s "https://raw.githubusercontent.com/iptv-org/iptv/master/streams/mx_pluto.m3u" -o playlist.m3u
           curl -L -s "https://raw.githubusercontent.com/matthuisman/i.mjh.nz/refs/heads/master/PlutoTV/mx.xml" -o epg_raw.xml
 
-      - name: Procesar con Python
+      - name: Procesar con Python (Extracción Mejorada)
         run: |
           python3 - <<EOF
           import xml.etree.ElementTree as ET
           import re
           import os
 
-          # 1. Extraer IDs de la lista recién descargada
           m3u_ids = set()
-          with open('playlist.m3u', 'r', encoding='utf-8') as f:
-              for line in f:
-                  match = re.search(r'tvg-id="([^"]+)"', line)
-                  if match:
-                      m3u_ids.add(match.group(1))
-          
-          print(f"IDs en M3U: {len(m3u_ids)}")
+          try:
+              # 1. Extracción ultra-robusta de IDs
+              if os.path.exists('playlist.m3u'):
+                  with open('playlist.m3u', 'r', encoding='utf-8') as f:
+                      content = f.read()
+                      # Buscamos tvg-id="valor" o tvg-id='valor' o incluso channel-id=
+                      found = re.findall(r'tvg-id=["\']([^"\']+)["\']', content)
+                      for fid in found:
+                          m3u_ids.add(fid)
+                          
+              print(f"IDs encontrados en M3U: {len(m3u_ids)}")
 
-          # 2. Cargar el EPG de Matt
-          tree = ET.parse('epg_raw.xml')
-          root = tree.getroot()
+              # 2. Cargar el EPG
+              tree = ET.parse('epg_raw.xml')
+              root = tree.getroot()
 
-          # 3. Guardar el EPG filtrado o completo
-          # Usamos el mismo nombre que TiviMate ya conoce
-          tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
-          print("EPG procesado exitosamente.")
+              # 3. Validar cuántos canales del XML coinciden
+              matches = 0
+              for channel in root.findall('channel'):
+                  if channel.get('id') in m3u_ids:
+                      matches += 1
+              
+              print(f"Coincidencias reales con el EPG: {matches}")
+
+              # 4. Guardar archivo final
+              tree.write('epg.xml', encoding='utf-8', xml_declaration=True)
+              print("Archivo epg.xml generado correctamente.")
+
+          except Exception as e:
+              print(f"Error: {e}")
+              exit(1)
           EOF
 
-      - name: Publicar Cambios Forzados
+      - name: Publicar Cambios
         run: |
           git config --local user.email "actions@github.com"
           git config --local user.name "GitHub Bot"
-          
-          # Limpiamos el temporal
           rm -f epg_raw.xml
-          
-          # Añadimos ambos archivos para asegurar sincronía
           git add playlist.m3u epg.xml
-          
-          # El commit siempre será diferente gracias a la fecha
           git commit -m "Sync Total: $(date +'%Y-%m-%d %H:%M:%S')" || exit 0
-          
-          # Empujamos los cambios
           git push origin main --force
